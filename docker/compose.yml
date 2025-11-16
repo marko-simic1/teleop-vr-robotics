@@ -1,0 +1,14 @@
+services:
+  dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: project_dev
+    working_dir: /app
+    volumes:
+      - ..:/app
+    tty: true
+    stdin_open: true
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
