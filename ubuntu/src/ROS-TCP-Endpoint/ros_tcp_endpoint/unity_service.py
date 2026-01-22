@@ -12,7 +12,7 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-import rospy
+import rclpy
 import socket
 import re
 
@@ -34,16 +34,18 @@ class UnityService(RosReceiver):
             queue_size:    Max number of entries to maintain in an outgoing queue
         """
         strippedTopic = re.sub("[^A-Za-z0-9_]+", "", topic)
-        self.node_name = "{}_service".format(strippedTopic)
+        node_name = f"{strippedTopic}_service"
+        RosReceiver.__init__(self, node_name)
 
         self.topic = topic
+        self.node_name = node_name
         self.service_class = service_class
         self.tcp_server = tcp_server
         self.queue_size = queue_size
 
-        self.service = rospy.Service(self.topic, self.service_class, self.send)
+        self.service = self.create_service(self.service_class, self.topic, self.send)
 
-    def send(self, request):
+    def send(self, request, response):
         """
         Connect to TCP endpoint on client, pass along message and get reply
         Args:
@@ -60,4 +62,4 @@ class UnityService(RosReceiver):
         Returns:
 
         """
-        self.service.shutdown()
+        self.destroy_node()

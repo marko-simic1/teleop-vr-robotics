@@ -12,12 +12,14 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-import rospy
+import rclpy
 import socket
 import re
 
+from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSReliabilityPolicy
+from rclpy.qos import QoSProfile
+
 from .communication import RosReceiver
-from .client import ClientThread
 
 
 class RosSubscriber(RosReceiver):
@@ -34,15 +36,20 @@ class RosSubscriber(RosReceiver):
             queue_size:    Max number of entries to maintain in an outgoing queue
         """
         strippedTopic = re.sub("[^A-Za-z0-9_]+", "", topic)
-        self.node_name = "{}_RosSubscriber".format(strippedTopic)
+        self.node_name = f"{strippedTopic}_RosSubscriber"
         RosReceiver.__init__(self, self.node_name)
         self.topic = topic
         self.msg = message_class
         self.tcp_server = tcp_server
         self.queue_size = queue_size
 
+        qos_profile = QoSProfile(depth=queue_size)
+
         # Start Subscriber listener function
-        self.sub = rospy.Subscriber(self.topic, self.msg, self.send)
+        self.subscription = self.create_subscription(
+            self.msg, self.topic, self.send, qos_profile  # queue_size
+        )
+        self.subscription
 
     def send(self, data):
         """
@@ -63,5 +70,5 @@ class RosSubscriber(RosReceiver):
         Returns:
 
         """
-        if not self.sub is None:
-            self.sub.unregister()
+        self.destroy_subscription(self.subscription)
+        self.destroy_node()

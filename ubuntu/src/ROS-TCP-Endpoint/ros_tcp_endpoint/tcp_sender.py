@@ -12,16 +12,18 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-import rospy
+import rclpy
 import socket
 import time
 import threading
-import struct
 import json
+
+from rclpy.node import Node
+from rclpy.serialization import deserialize_message
+from rclpy.serialization import serialize_message
 
 from .client import ClientThread
 from .thread_pauser import ThreadPauser
-from io import BytesIO
 
 # queue module was renamed between python 2 and 3
 try:
@@ -38,6 +40,8 @@ class UnityTcpSender:
     """
 
     def __init__(self, tcp_server):
+        # super().__init__(f'UnityTcpSender')
+
         self.sender_id = 1
         self.time_between_halt_checks = 5
         self.tcp_server = tcp_server
@@ -105,7 +109,7 @@ class UnityTcpSender:
         # so it won't break anything if we sleep now while waiting for the response
         thread_pauser.sleep_until_resumed()
 
-        response = service_class._response_class().deserialize(thread_pauser.result)
+        response = deserialize_message(thread_pauser.result, service_class.Response())
         return response
 
     def send_unity_service_response(self, srv_id, data):
@@ -131,9 +135,23 @@ class UnityTcpSender:
     def send_topic_list(self):
         if self.queue is not None:
             topic_list = SysCommand_TopicsResponse()
-            topics_and_types = rospy.get_published_topics()
+            topics_and_types = self.tcp_server.get_topic_names_and_types()
             topic_list.topics = [item[0] for item in topics_and_types]
-            topic_list.types = [item[1] for item in topics_and_types]
+            for i in topics_and_types:
+                node = self.get_registered_topic(i[0])
+                if len(i[1]) > 1:
+                    if node is not None:
+                        self.tcp_server.get_logger().warning(
+                            "Only one message type per topic is supported, but found multiple types for topic {}; maintaining {} as the subscribed type.".format(
+                                i[0], self.parse_message_name(node.msg)
+                            )
+                        )
+                topic_list.types = [
+                    item[1][0].replace("/msg/", "/")
+                    if (len(item[1]) <= 1)
+                    else self.parse_message_name(node.msg)
+                    for item in topics_and_types
+                ]
             serialized_bytes = ClientThread.serialize_command("__topic_list", topic_list)
             self.queue.put(serialized_bytes)
 
@@ -195,18 +213,18 @@ class UnityTcpSender:
 
 class SysCommand_Log:
     def __init__(self):
-        self.text = ""
+        text = ""
 
 
 class SysCommand_Service:
     def __init__(self):
-        self.srv_id = 0
+        srv_id = 0
 
 
 class SysCommand_TopicsResponse:
     def __init__(self):
-        self.topics = []
-        self.types = []
+        topics = []
+        types = []
 
 
 class SysCommand_Handshake:
@@ -217,4 +235,4 @@ class SysCommand_Handshake:
 
 class SysCommand_Handshake_Metadata:
     def __init__(self):
-        self.protocol = "ROS1"
+        self.protocol = "ROS2"
