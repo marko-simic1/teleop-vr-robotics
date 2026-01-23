@@ -4,7 +4,7 @@ using RosMessageTypes.Sensor;
 
 public class OakImageSubscriber : MonoBehaviour
 {
-    public string topicName = "/oak/rgb/image_raw/compressed";
+    public string topicName = "camera/camera/color/image_raw/compressed";
 
     private ROSConnection ros;
     private Texture2D texture;
