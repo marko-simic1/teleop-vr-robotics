@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using Unity.Robotics.ROSTCPConnector;
 using RosMessageTypes.Geometry;
 using UnityEngine.InputSystem;
@@ -11,48 +11,40 @@ public class ClickToGoal : MonoBehaviour
     public string topicName = "/goal_point";
 
     [Header("VR Input")]
-    // Ovdje prevuci Right Controller iz hijerarhije
-    public Transform rightController;
-    // Ovdje odaberi 'XRI RightHand Interaction/Activate' (Use Reference)
+    public Transform controllerTransform;
     public InputActionProperty aimAction;
 
     public LayerMask groundLayerMask = ~0;
 
     ROSConnection ros;
+    bool wasPressed = false;
 
     void Start()
     {
         ros = ROSConnection.GetOrCreateInstance();
         ros.RegisterPublisher<PointMsg>(topicName);
-        Debug.Log($"[ClickToGoalPublisher] Publishing goals to {topicName}");
     }
 
     void Update()
     {
-        // Čitamo da li je stisnut Trigger na kontroleru
         float triggerValue = aimAction.action != null ? aimAction.action.ReadValue<float>() : 0;
-
-        // Ako je trigger stisnut (vrijednost veća od 0.5)
-        if (triggerValue > 0.5f)
+        bool isPressed = triggerValue > 0.5f;
+        if (isPressed && !wasPressed)
         {
-            // Pucamo zraku iz VR kontrolera prema naprijed
-            if (Physics.Raycast(rightController.position, rightController.forward, out RaycastHit hit, 100f, groundLayerMask))
-            {
-                Vector3 p = hit.point;
+            ShootRay();
+        }
 
-                // Stvori vizualni marker na podu
-                if (markerSpawner != null)
-                {
-                    markerSpawner.SpawnMarker(p);
-                }
+        wasPressed = isPressed;
+    }
 
-                // Pretvaramo Unity koordinate (x, z) u ROS koordinate (x, y)
-                // Unity Z je ROS Y
-                var msg = new PointMsg(p.x, p.z, 0.0);
-                ros.Publish(topicName, msg);
-
-                Debug.Log($"[ClickToGoalPublisher] Goal sent: x={p.x:F2}, y={p.z:F2}");
-            }
+    void ShootRay()
+    {
+        if (Physics.Raycast(controllerTransform.position, controllerTransform.forward, out RaycastHit hit, 100f, groundLayerMask))
+        {
+            Vector3 p = hit.point;
+            if (markerSpawner != null) markerSpawner.SpawnMarker(p);
+            var msg = new PointMsg(p.x, p.z, 0.0);
+            ros.Publish(topicName, msg);
         }
     }
 }

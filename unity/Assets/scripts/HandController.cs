@@ -5,86 +5,66 @@ using UnityEngine.InputSystem;
 
 public class HandController : MonoBehaviour
 {
-    [Header("Postavke")]
-    public bool useVR = false; // <--- OVO JE TA KVAČICA KOJU TRAŽIŠ
-    public string topicName = "/servo_server/delta_twist_cmds";
-    public float speedMultiplier = 1.0f;
-    public float deadZone = 0.05f;
+    [Header("ROS Settings")]
+    public string topicName = "/cmd_vel_nav"; 
+    public float speed = 0.5f;
+    public float turnSpeed = 1.0f;
 
-    [Header("VR Reference")]
-    public Transform rightController;
-    public InputActionProperty activateAction;
+    [Header("VR Settings")]
+    public bool useVR = true; 
+    public InputActionProperty moveAction;
 
-    private ROSConnection ros;
-    private bool isActive = false;
-    private Vector3 startPosition;
+    ROSConnection ros;
 
     void Start()
     {
         ros = ROSConnection.GetOrCreateInstance();
-        ros.RegisterPublisher<TwistStampedMsg>(topicName);
+        ros.RegisterPublisher<TwistMsg>(topicName);
     }
 
     void Update()
     {
-        Vector3 velocityToSend = Vector3.zero;
+        float linear = 0f;
+        float angular = 0f;
 
-        // --- AKO KORISTIMO VR (KVAČICA JE UKLJUČENA) ---
         if (useVR)
         {
-            float triggerValue = activateAction.action != null ? activateAction.action.ReadValue<float>() : 0;
-            bool isPressed = triggerValue > 0.5f;
-
-            if (isPressed && !isActive)
+            Vector2 inputVector = moveAction.action != null ? moveAction.action.ReadValue<Vector2>() : Vector2.zero;
+            if (inputVector.magnitude > 0.1f)
             {
-                isActive = true;
-                startPosition = rightController.position;
-            }
-            else if (!isPressed && isActive)
-            {
-                isActive = false;
-            }
-
-            if (isActive)
-            {
-                Vector3 delta = rightController.position - startPosition;
-                if (delta.magnitude > deadZone) velocityToSend = delta * speedMultiplier;
+                linear = inputVector.y * speed;    
+                angular = -inputVector.x * turnSpeed; 
             }
         }
-        // --- AKO NE KORISTIMO VR (WASD) ---
         else
         {
-            if (Input.GetKey(KeyCode.Space))
-            {
-                isActive = true;
-                if (Input.GetKey(KeyCode.W)) velocityToSend.z = 1.0f;
-                if (Input.GetKey(KeyCode.S)) velocityToSend.z = -1.0f;
-                if (Input.GetKey(KeyCode.A)) velocityToSend.x = -1.0f;
-                if (Input.GetKey(KeyCode.D)) velocityToSend.x = 1.0f;
-                if (Input.GetKey(KeyCode.Q)) velocityToSend.y = 1.0f;
-                if (Input.GetKey(KeyCode.E)) velocityToSend.y = -1.0f;
-
-                velocityToSend *= speedMultiplier;
-            }
-            else
-            {
-                isActive = false;
-            }
+            if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow)) linear = speed;
+            if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow)) linear = -speed;
+            if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow)) angular = turnSpeed; 
+            if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) angular = -turnSpeed; 
         }
 
-        // Šalji poruku ako smo aktivni ili ako treba poslati stop (0,0,0)
-        if (isActive || (!isActive && velocityToSend == Vector3.zero))
+        bool isMoving = (linear != 0 || angular != 0);
+        
+        if (isMoving)
         {
-            PublishVelocity(velocityToSend);
+            PublishVelocity(linear, angular);
+        }
+        else if (useVR && moveAction.action != null && moveAction.action.WasReleasedThisFrame())
+        {
+             PublishVelocity(0, 0);
+        }
+        else if (!useVR && (Input.GetKeyUp(KeyCode.W) || Input.GetKeyUp(KeyCode.S) || Input.GetKeyUp(KeyCode.A) || Input.GetKeyUp(KeyCode.D)))
+        {
+            PublishVelocity(0, 0);
         }
     }
 
-    void PublishVelocity(Vector3 inputVector)
+    void PublishVelocity(float lin, float ang)
     {
-        TwistStampedMsg msg = new TwistStampedMsg();
-        msg.twist.linear.x = inputVector.z;
-        msg.twist.linear.y = -inputVector.x;
-        msg.twist.linear.z = inputVector.y;
+        TwistMsg msg = new TwistMsg();
+        msg.linear.x = lin; 
+        msg.angular.z = ang; 
         ros.Publish(topicName, msg);
     }
 }

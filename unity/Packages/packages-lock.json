@@ -285,6 +285,12 @@
       },
       "url": "https://packages.unity.com"
     },
+    "jp.keijiro.pcx": {
+      "version": "file:C:/Users/Lenovo/Downloads/Pcx-master/Pcx-master/Packages/jp.keijiro.pcx",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {}
+    },
     "org.khronos.unitygltf": {
       "version": "https://github.com/KhronosGroup/UnityGLTF.git",
       "depth": 0,
