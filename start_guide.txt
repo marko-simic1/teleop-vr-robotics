@@ -1,0 +1,76 @@
+ROS 2 – RTAB-Map + Unity Visualization
+
+This project enables running RTAB-Map in a ROS 2 environment and visualizing the camera feed and 3D map in Unity.
+If you do not have a physical camera available, a recorded rosbag can be used instead.
+
+==================================================
+PREREQUISITES
+==================================================
+
+Before running the project, make sure you have:
+
+- ROS 2 installed
+- RTAB-Map installed
+- ROS-TCP-Endpoint installed
+- A Unity project with correctly set up scripts, materials, shaders, and parameters
+
+Rosbag (if you do not have a physical camera):
+Download the rosbag from the following link:
+https://drive.google.com/drive/folders/1h250AIz5JwJBPNgs4VBfWZEaEpJVqMLa?usp=sharing
+
+==================================================
+RUN INSTRUCTIONS (ROS 2)
+==================================================
+
+1. Start ROS-TCP-Endpoint
+
+Open a new terminal and run:
+ros2 run ros_tcp_endpoint default_server_endpoint
+
+--------------------------------------------------
+
+2. Play rosbag (optional)
+
+If you are using a rosbag instead of a physical camera, run:
+ros2 bag play rosbag2_2026_01_26-11_43_53_0.db3 --clock
+
+--------------------------------------------------
+
+3. Start RTAB-Map launch file
+
+Run the launch file:
+ros2 launch rtabmap_examples realsense_d400.launch.py
+
+Note:
+The launch file can be started on its own (when using a physical camera)
+or together with a rosbag.
+
+==================================================
+UNITY INSTRUCTIONS
+==================================================
+
+1. Open the Unity project
+2. If scripts are not automatically connected:
+   - Select VisualizerManager
+   - In the Inspector, assign the scripts to the appropriate fields
+3. Verify:
+   - materials
+   - shaders
+   - parameters
+4. Start the project (Play)
+
+--------------------------------------------------
+
+Controls:
+C - camera feed
+M - 3D map
+
+==================================================
+NOTES
+==================================================
+
+- Ensure that ROS and Unity are using the same network (localhost or IP)
+- If data is not displayed in Unity, check:
+  - ROS-TCP connection
+  - active ROS topics
+- Rosbag files are not included in the repository and must be downloaded separately
