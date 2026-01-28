@@ -15,4 +15,5 @@ docker run -it \
   --env DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix \
   -v "$REPO_ROOT/ubuntu/src":/root/ros2_ws/src \
+  -v /dev:/dev \
   dipl-proj
