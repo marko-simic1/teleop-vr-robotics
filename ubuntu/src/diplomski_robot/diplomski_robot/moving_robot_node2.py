@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 import math
 import rclpy
 from rclpy.node import Node
@@ -15,19 +16,21 @@ def quat_from_yaw(yaw: float) -> Quaternion:
     return q
 
 class MovingRobot(Node):
+
     def __init__(self):
-        super().__init__("moving_robot")
+        super().__init__("moving_robot") 
 
         self.cmd_topic = "/cmd_vel"
         self.odom_topic = "/odom"
 
         self.x = 0.0
         self.y = 0.0
-        #direction in which the robot is looking at 
-        #yaw = 0 -> right
-        #yaw = 90 -> up
-        #yaw = 180 -> left
-        #yaw = -90 -> down
+
+        # direction in which the robot is looking at 
+        # yaw = 0 -> right
+        # yaw = 90 -> up
+        # yaw = 180 -> left
+        # yaw = -90 -> down
         self.yaw = 0.0
         self.v = 0.0
         self.w = 0.0
@@ -48,6 +51,7 @@ class MovingRobot(Node):
         now = self.get_clock().now()
         dt = (now - self.last_time).nanoseconds * 1e-9
         self.last_time = now
+
         if dt <= 0.0:
             return
 
@@ -81,5 +85,5 @@ def main():
     node.destroy_node()
     rclpy.shutdown()
 
-if __name__ == "__main__":
+if __name__ == "__main__": 
     main()
