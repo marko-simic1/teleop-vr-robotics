@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<robot name="interactive_sphere_model"> <link name="sphere_link">
+    <inertial>
+      <mass value="1.0"/>
+      <origin xyz="0 0 0"/>
+      <inertia ixx="0.00666" ixy="0" ixz="0" iyy="0.00666" iyz="0" izz="0.00666"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.05"/>
+      </geometry>
+      <material name="red">
+        <color rgba="0.8 0 0 1"/>
+      </material>
+    </visual>
+    <collision name="sphere_collision">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.05"/>
+      </geometry>
+    </collision>
+
+    <sensor name="sphere_contact_sensor" type="contact">
+      <contact>
+        <collision>sphere_collision</collision>
+      </contact>
+      <plugin name="box1_bumper_controller" filename="libgazebo_ros_bumper.so">
+                        <alwaysOn>1</alwaysOn>
+                        <updateRate>10.0</updateRate>
+                        <bumperTopicName>sphere_contact</bumperTopicName>
+                        <frameName>sphere</frameName></plugin>
+    </sensor>
+  </link>
+</robot>

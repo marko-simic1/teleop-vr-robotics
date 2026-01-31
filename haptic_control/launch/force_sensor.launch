@@ -1,0 +1,11 @@
+<launch>
+  <!-- Launch haptic device driver -->
+  <include file="$(find omni_common)/launch/touch.launch"/>
+
+  <!-- Launch haptic device driver -->
+  <include file="$(find optoforce)/launch/optoforce.launch"/>
+
+  <!-- Launch haptic control node -->
+  <node pkg="haptic_control" type="force_feedback.py" name="force_feedback" output="screen"/>
+
+</launch>

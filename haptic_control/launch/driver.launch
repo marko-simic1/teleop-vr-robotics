@@ -1,0 +1,7 @@
+<launch>
+  <!-- Launch haptic device driver -->
+  <include file="$(find omni_common)/launch/touch.launch"/>
+
+  <!-- Launch haptic device driver -->
+  <include file="$(find optoforce)/launch/optoforce.launch"/>
+</launch>

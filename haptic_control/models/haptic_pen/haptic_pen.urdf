@@ -1,0 +1,62 @@
+<?xml version="1.0"?>
+<robot name="haptic_pen">
+
+  <link name="base_link">
+    <inertial>
+      <mass value="0.01"/>
+      <origin xyz="0 0 0"/>
+      <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6"/>
+    </inertial>
+
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.57079632679 1.57079632679"/>
+      <geometry>
+        <cylinder length="0.1" radius="0.005"/>
+      </geometry>
+      <material name="blue">
+        <color rgba="0 0 0.8 1"/>
+      </material>
+    </visual>
+  </link>
+
+  <link name="pen_tip_link">
+    <inertial>
+      <mass value="0.001"/> <origin xyz="0 0 0"/>
+      <inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/>
+    </inertial>
+
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.005"/> </geometry>
+      <material name="red">
+        <color rgba="0.8 0 0 1"/> </material>
+    </visual>
+
+    <collision name="pen_tip_collision">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.005"/>
+      </geometry>
+    </collision>
+
+    <sensor name='pen_contact_sensor' type='contact'>
+      <contact>
+        <collision>pen_tip_collision</collision>
+      </contact>
+      <plugin name="pen_bumper_controller" filename="libgazebo_ros_bumper.so">
+        <always_on>1</always_on>
+        <update_rate>10.0</update_rate>
+        <bumperTopicName>pen_contact_2</bumperTopicName>
+        <frameName>pen</frameName>
+      </plugin>
+    </sensor>
+  </link>
+
+  <joint name="pen_tip_joint" type="fixed">
+    <parent link="pen_tip_link"/>
+    <child link="base_link"/>
+    <origin xyz="0 -0.05 0" rpy="0 0 0"/>
+  </joint>
+
+</robot>

@@ -1,0 +1,572 @@
+#!/usr/bin/env python3
+
+import rospy
+import numpy as np
+from geometry_msgs.msg import PoseStamped, Vector3, Pose, Point, Quaternion
+from gazebo_msgs.srv import SetModelState, SetModelStateRequest
+from gazebo_msgs.msg import ModelState, ContactsState, ContactState
+from omni_msgs.msg import OmniFeedback
+import tf.transformations as transformations # Import for quaternion and matrix operations
+
+class HapticToGazeboPen:
+    def __init__(self):
+        rospy.init_node('haptic_to_gazebo_pen')
+
+        # Subscribers
+        # Subscribes to the haptic device's pose
+        self.haptic_pose_sub = rospy.Subscriber('/touch/stylus_pose', PoseStamped, self.haptic_pose_callback)
+        # Subscribes to Gazebo contact states for the haptic pen
+        self.contact_sub = rospy.Subscriber('/sphere_contact', ContactsState, self.contact_callback)
+        
+        # Publishers
+        # Publishes force feedback to the haptic device driver
+        self.force_feedback_pub = rospy.Publisher('/touch/force_feedback', OmniFeedback, queue_size=1)
+
+        self.contact_pub = rospy.Publisher('/pen_contact', ContactState, queue_size=1)
+        
+        # Services
+        # Service client to set the model state of the pen in Gazebo
+        self.set_model_state_proxy = rospy.ServiceProxy('/gazebo/set_model_state', SetModelState)
+        
+        # Parameters
+        self.pen_name = "haptic_pen"  # Name of the pen model in Gazebo
+        self.desired_tip_pose = None       # Stores the latest tip pose received from the haptic device
+
+        self.counter_pose = 0
+        self.counter_contact = 0
+
+        # From your URDF: <origin xyz="0 0 0.05" rpy="0 0 0"/>
+        self.tip_offset_from_base = np.array([0.0, 0.0, 0.05]) # x, y, z in meters
+
+        # Define a fixed rotation offset for the pen's orientation.
+        # You might need to adjust these values based on your physical stylus orientation
+        # and how you want the Gazebo pen (base_link) to be oriented.
+        # If the haptic stylus's Z-axis is its length, and your Gazebo pen's base_link
+        # has its Z-axis pointing up (length along Z), and the pen_tip_link is also
+        # along Z, then a simple 90-degree rotation around Y might still be good.
+        # The goal is to align the incoming 'stylus_pose' quaternion with the desired
+        # 'base_link' quaternion.
+        #self.stylus_to_base_orientation_offset = transformations.quaternion_from_euler(0, np.pi/2, np.pi/2) # RPY in radians (0, 90 deg, 0)
+        self.stylus_to_base_orientation_offset = transformations.quaternion_from_euler(0, 0, 0) # RPY in radians (0, 90 deg, 0)
+
+        # Define force feedback properties for different objects
+        self.object_properties = {
+            "interactive_sphere_model": { # Make sure this matches your URDF's robot name
+                "stiffness": 500.0,  # N/m
+            },
+            "another_cube_model": { # Example for another object
+                "stiffness": 800.0,
+            }
+        }
+        # Default properties if an object isn't found in the dictionary
+        self.default_properties = {"stiffness": 0.0}
+
+    def haptic_pose_callback(self, msg):
+        """
+        Callback for the haptic device's pose.
+        Updates the desired tip pose for the Gazebo pen model.
+        """
+        self.counter_pose = self.counter_pose + 1
+        if self.counter_pose >= 10: # Increased frequency for smoother updates
+            self.desired_tip_pose = msg.pose
+            self.publish_gazebo_pose()
+            self.counter_pose = 0
+
+    def contact_callback(self, msg):
+        """
+        Callback for Gazebo contact states.
+        Calculates and publishes force feedback based on detected contacts.
+        (Contact feedback logic remains the same as it correctly identifies collisions)
+        """
+        #rospy.loginfo("Received ContactsState message.")
+        if msg.states:
+            for contact_state in msg.states:
+                if (contact_state.collision1_name != "ground_plane::link::collision") and \
+                   (contact_state.collision2_name != "ground_plane::link::collision"): 
+                    rospy.loginfo(f"  Collision 1 Name: {contact_state.collision1_name}")
+                    rospy.loginfo(f"  Collision 2 Name: {contact_state.collision2_name}")
+        else:
+            rospy.loginfo("  No contact states reported in this message.")
+         
+        self.counter_contact = self.counter_contact + 1
+        if self.counter_contact >= 10:
+            
+            #rospy.loginfo("force callback")
+            # Initialize total force and position for feedback
+            total_force_feedback = Vector3(0, 0, 0)
+            contact_position_feedback = Vector3(0, 0, 0)
+            num_contacts = 0
+
+            if not msg.states:  # No contacts detected
+                self.publish_force_feedback(Vector3(0, 0, 0), Vector3(0, 0, 0)) # Send zero force
+                return
+            
+            for contact_state in msg.states:
+                colliding_object_name = None
+                
+                # Identify the other object involved in the collision
+                # "haptic_pen::pen_tip_link::pen_tip_link_fixed_joint_lump__pen_tip_collision_collision"
+                # "haptic_pen::base_link::base_link_fixed_joint_lump__pen_tip_collision_collision"
+                if (contact_state.collision1_name == "haptic_pen::pen_tip_link::pen_tip_link_fixed_joint_lump__pen_tip_collision_collision") or \
+                   (contact_state.collision2_name == "haptic_pen::pen_tip_link::pen_tip_link_fixed_joint_lump__pen_tip_collision_collision"):
+                    rospy.loginfo("Contacts with pen detected")
+                    #rospy.loginfo(f"  total_wrench: {contact_state.total_wrench}")
+                    #rospy.loginfo(f"  contact_positions: {contact_state.contact_positions}")
+                    #rospy.loginfo(f"  depths: {contact_state.depths}")
+                    self.contact_pub.publish(contact_state)
+
+                    current_stiffness = self.object_properties["interactive_sphere_model"]["stiffness"]
+
+                    # A contact can have multiple contact points. Sum their contributions.
+                    for i, contact_point in enumerate(contact_state.contact_positions):
+
+                        # Accumulate forces and positions
+                        total_force_feedback.x += contact_state.wrenches[0].force.x * 100
+                        total_force_feedback.y += contact_state.wrenches[0].force.y * 100
+                        total_force_feedback.z += contact_state.wrenches[0].force.z * 100
+
+                        contact_position_feedback.x += contact_point.x
+                        contact_position_feedback.y += contact_point.y
+                        contact_position_feedback.z += contact_point.z
+                        num_contacts += 1
+            
+            if num_contacts > 0:
+                # Average the contact position if there are multiple contact points
+                contact_position_feedback.x /= num_contacts
+                contact_position_feedback.y /= num_contacts
+                contact_position_feedback.z /= num_contacts
+            
+            # Publish the total calculated force and average contact position
+            self.publish_force_feedback(total_force_feedback, contact_position_feedback)
+            # rospy.loginfo(f"  total_force_feedback: {total_force_feedback}")
+            # rospy.loginfo(f"  contact_position_feedback: {contact_position_feedback}")
+
+            self.counter_contact = 0
+
+    def publish_force_feedback(self, force, position):
+        """
+        Publishes the calculated force and position feedback to the haptic device.
+        """
+        feedback_msg = OmniFeedback()
+        feedback_msg.force = force
+        feedback_msg.position = position
+        self.force_feedback_pub.publish(feedback_msg)
+
+    def publish_gazebo_pose(self):
+        """
+        Calculates the required base_link pose to make the tip follow the desired_tip_pose
+        and sends it to Gazebo to update the pen model's position.
+        """
+        if self.desired_tip_pose is not None:
+            # 1. Get the desired tip position and orientation from the haptic device
+            desired_tip_pos_global = np.array([self.desired_tip_pose.position.x,
+                                               self.desired_tip_pose.position.y,
+                                               self.desired_tip_pose.position.z])
+            
+            haptic_stylus_quat = np.array([self.desired_tip_pose.orientation.x,
+                                           self.desired_tip_pose.orientation.y,
+                                           self.desired_tip_pose.orientation.z,
+                                           self.desired_tip_pose.orientation.w])
+
+            # 2. Apply the fixed rotation offset to align the haptic stylus's orientation
+            # with the desired orientation of the Gazebo pen's base_link.
+            # This 'stylus_to_base_orientation_offset' should transform the haptic stylus's
+            # quaternion to what the base_link's quaternion should be.
+            base_link_quat_gazebo = transformations.quaternion_multiply(haptic_stylus_quat, self.stylus_to_base_orientation_offset)
+            
+            # 3. Get the rotation matrix from the calculated base_link orientation
+            base_rot_matrix = transformations.quaternion_matrix(base_link_quat_gazebo)[:3, :3]
+
+            # 4. Calculate the base_link's position
+            # The tip_offset_from_base is defined in the base_link's local frame.
+            # To get its global contribution, we rotate it by the base_link's global orientation.
+            offset_global = base_rot_matrix @ self.tip_offset_from_base
+
+            # The base_link's position is the desired tip position minus this global offset
+            base_pos_global = desired_tip_pos_global - offset_global
+
+            # 5. Construct the ModelState message for the haptic_pen model (which sets its base_link's pose)
+            model_state = ModelState()
+            model_state.model_name = self.pen_name
+            
+            # # Set the position of the base_link
+            # model_state.pose.position.x = base_pos_global[0]
+            # model_state.pose.position.y = base_pos_global[1]
+            # model_state.pose.position.z = base_pos_global[2]
+
+            # # Set the orientation of the base_link
+            # model_state.pose.orientation.x = base_link_quat_gazebo[0]
+            # model_state.pose.orientation.y = base_link_quat_gazebo[1]
+            # model_state.pose.orientation.z = base_link_quat_gazebo[2]
+            # model_state.pose.orientation.w = base_link_quat_gazebo[3]
+
+            model_state.pose.position.x = desired_tip_pos_global[0]
+            model_state.pose.position.y = desired_tip_pos_global[1]
+            model_state.pose.position.z = desired_tip_pos_global[2]
+
+            # Set the orientation of the base_link
+            model_state.pose.orientation.x = haptic_stylus_quat[0]
+            model_state.pose.orientation.y = haptic_stylus_quat[1]
+            model_state.pose.orientation.z = haptic_stylus_quat[2]
+            model_state.pose.orientation.w = haptic_stylus_quat[3]
+            
+            try:
+                req = SetModelStateRequest()
+                req.model_state = model_state
+                resp = self.set_model_state_proxy(req)
+                if not resp.success:
+                    rospy.logwarn(f"Failed to set model state for {self.pen_name}: {resp.status_message}")
+            except rospy.ServiceException as e:
+                rospy.logerr(f"Service call to set_model_state failed: {e}")
+
+if __name__ == '__main__':
+    try:
+        haptic_to_gazebo_pen = HapticToGazeboPen()
+        rospy.spin()
+    except rospy.ROSInterruptException:
+        pass
+
+
+
+
+
+
+#!/usr/bin/env python3
+
+import sys
+import time
+import rospy
+import moveit_commander
+import moveit_msgs.msg
+import geometry_msgs.msg
+from math import pi
+from std_srvs.srv import Empty
+import numpy as np
+import tf # Import the tf library for TransformListener
+from tf.transformations import quaternion_multiply, quaternion_from_euler, euler_from_quaternion, quaternion_inverse
+
+class KinovaMoveItTeleop(object):
+    """
+    KinovaMoveItTeleop: Controls the Kinova robotic arm by listening to a TF transform
+    broadcasted by a haptic controller (e.g., your Controller script).
+    It expects a transform named 'accumulated_object_frame' relative to a 'world' or 'robot_base' frame
+    and commands the robot's end-effector to reach that absolute pose.
+    """
+    def __init__(self):
+        # Initialize MoveIt Commander and ROS node
+        super(KinovaMoveItTeleop, self).__init__()
+        moveit_commander.roscpp_initialize(sys.argv)
+        rospy.init_node('kinova_moveit_teleop', anonymous=True)
+
+        namespace = "/my_gen3/" # This namespace is used for other parameters as well
+
+        # Flag to indicate if the MoveIt interface is successfully initialized
+        self.is_init_success = False # Initialize to False, set to True only on full success
+
+        # Retrieve parameters from the ROS parameter server
+        try:
+            self.is_gripper_present = rospy.get_param(namespace + "is_gripper_present", False)
+            if self.is_gripper_present:
+                gripper_joint_names = rospy.get_param(namespace + "gripper_joint_names", [])
+                self.gripper_joint_name = gripper_joint_names[0]
+            else:
+                self.gripper_joint_name = ""
+            self.degrees_of_freedom = rospy.get_param(namespace + "degrees_of_freedom", 7)
+
+            # Define the MoveIt group names (e.g., "arm" for the robotic arm)
+            arm_group_name = "arm"
+            
+            # Initialize RobotCommander, Scene, and MoveGroupCommander
+            # Pass the full parameter name including the namespace for robot_description
+            self.robot = moveit_commander.RobotCommander(robot_description=namespace + "robot_description") 
+            self.scene = moveit_commander.PlanningSceneInterface(ns=namespace)
+            self.arm_group = moveit_commander.MoveGroupCommander(arm_group_name, ns=namespace)
+
+            # Publisher for displaying planned trajectories (useful for debugging)
+            self.display_trajectory_publisher = rospy.Publisher(
+                namespace + 'move_group/display_planned_path',
+                moveit_msgs.msg.DisplayTrajectory,
+                queue_size=20
+            )
+
+            # If a gripper is present, initialize its MoveGroupCommander
+            if self.is_gripper_present:
+                gripper_group_name = "gripper"
+                self.gripper_group = moveit_commander.MoveGroupCommander(gripper_group_name, ns=namespace)
+
+            rospy.loginfo("Initializing Kinova MoveIt Teleop node in namespace " + namespace)
+
+            # --- CRITICAL: Define robot_base_frame BEFORE its usage ---
+            # The base frame of your robot. This is the frame your robot's poses are typically given relative to.
+            # Common options: "base_link", "world", "kinova_link_base".
+            self.robot_base_frame = self.arm_group.get_planning_frame()
+            rospy.loginfo(f"Robot planning frame: {self.robot_base_frame}")
+
+            # Get the robot's end-effector link name from MoveIt
+            self.ee_link = self.arm_group.get_end_effector_link()
+            if not self.ee_link:
+                rospy.logerr("Could not get end-effector link name from MoveIt. Is it configured correctly?")
+                # Do not return here, allow the rest of the initialization to fail gracefully
+                # by setting is_init_success to False.
+                self.is_init_success = False 
+                return # Exit init if critical component is missing
+
+            rospy.loginfo(f"Robot End-Effector Link: {self.ee_link}")
+
+            # --- Wait for robot's initial pose to become available ---
+            # It's crucial to wait for the robot's state to be published and MoveIt to be ready.
+            # get_current_pose() might return zeros initially.
+            initial_robot_pose = None
+            max_attempts = 20 # Increased attempts for robustness
+            for i in range(max_attempts):
+                current_pose_stamped = self.arm_group.get_current_pose()
+                initial_robot_pose = current_pose_stamped.pose
+                # Check for non-zero values to ensure a valid pose, not just default zeros
+                if initial_robot_pose.position.x != 0.0 or \
+                   initial_robot_pose.position.y != 0.0 or \
+                   initial_robot_pose.position.z != 0.0:
+                    rospy.loginfo(f"Robot initial pose obtained after {i+1} attempts: {initial_robot_pose}")
+                    break
+                rospy.logwarn(f"Waiting for valid robot initial pose (attempt {i+1}/{max_attempts}). Current: {initial_robot_pose}")
+                rospy.sleep(0.5) # Wait a bit for topics to populate
+
+            if initial_robot_pose is None or (initial_robot_pose.position.x == 0.0 and \
+                                              initial_robot_pose.position.y == 0.0 and \
+                                              initial_robot_pose.position.z == 0.0):
+                rospy.logerr("Could not get a valid initial robot end-effector pose after multiple attempts. Teleoperation might not start correctly.")
+                self.is_init_success = False
+                return # Exit init if critical component is missing
+
+            self.initial_robot_ee_pose = initial_robot_pose
+            
+            # --- Publisher for the robot's initial EE pose ---
+            self.initial_robot_pose_pub = rospy.Publisher(
+                "/robot_arm/initial_ee_pose",
+                geometry_msgs.msg.PoseStamped,
+                queue_size=1,
+                latch=True # Latch means subscribers get the last published message immediately
+            )
+            initial_pose_msg = geometry_msgs.msg.PoseStamped()
+            initial_pose_msg.header.stamp = rospy.Time.now()
+            initial_pose_msg.header.frame_id = self.robot_base_frame 
+            initial_pose_msg.pose = self.initial_robot_ee_pose
+            self.initial_robot_pose_pub.publish(initial_pose_msg)
+            rospy.loginfo("Published initial robot end-effector pose.")
+
+            # Initialize TF Listener
+            self.tf_listener = tf.TransformListener()
+            
+            # The frame ID of the accumulated pose broadcasted by the haptic controller.
+            self.haptic_target_frame = "accumulated_object_frame"
+
+            # --- Adjustments for Overshooting and Trajectory Errors ---
+
+            # 1. min_move_command_interval: This gives MoveIt and the robot
+            #    more time to complete the current micro-movement before a new command arrives.
+            #    Start with a higher value and decrease if motion becomes too choppy.
+            self.min_move_command_interval = rospy.Duration(0.025) # Try 10 Hz command rate
+
+            # 2. Set more reasonable maximum speeds for the manual scaling (if used).
+            #    These values are used in the scaling logic within tf_lookup_callback.
+            #    They should be consistent with (or slightly higher than) MoveIt's scaling factors.
+            self.max_linear_speed = 1.0 # m/s (e.g., 7.5 cm/s - start low, increase slowly)
+            self.max_angular_speed = 1.0 # rad/s (e.g., ~8.5 degrees/s - start low, increase slowly)
+
+            # 3. Set MoveIt goal tolerances: This tells MoveIt how close is "close enough"
+            #    to the target. Looser tolerances can prevent endless "hunting" for exact points.
+            self.arm_group.set_goal_position_tolerance(0.01)  # 1 cm tolerance
+            self.arm_group.set_goal_orientation_tolerance(0.02) # approx 1.1 degrees
+
+            # 4. Shorten planning time for responsiveness, but allow multiple attempts
+            self.arm_group.set_planning_time(0.02) # Try 0.2-0.5 seconds for planning
+            self.arm_group.set_num_planning_attempts(5) # Allow more attempts if planning fails
+
+            # 5. CRITICAL: Set the maximum velocity and acceleration scaling factors for MoveIt
+            #    This directly limits how fast MoveIt tries to move the robot.
+            #    These values are fractions (0.0 to 1.0) of the robot's maximum capabilities.
+            #    Start very low and increase gradually.
+            self.arm_group.set_max_velocity_scaling_factor(1.0) # Start low (e.g., 20% of max speed)
+            self.arm_group.set_max_acceleration_scaling_factor(1.0) # Even lower for acceleration for smoother stops
+
+            # 6. Timer for TF lookup
+            #    This should generally match or be slightly faster than your min_move_command_interval
+            #    If min_move_command_interval is 0.1, a 0.02-0.05s timer is fine for listening to TF.
+            self.tf_timer = rospy.Timer(rospy.Duration(0.02), self.tf_lookup_callback) # Check every 20ms
+
+            self.is_init_success = True # If we reached here, initialization was successful
+            rospy.loginfo("Kinova MoveIt Teleop node ready. Waiting for TF commands...")
+
+        except Exception as e:
+            rospy.logerr(f"Failed to initialize KinovaMoveItTeleop: {e}")
+            self.is_init_success = False # Ensure this is set if any error occurs
+
+        self.last_move_command_time = rospy.Time.now() # This is initialized here, but also used in timer callback
+
+    def tf_lookup_callback(self, event):
+        """
+        Timer callback function to periodically look up the desired TF transform.
+        """
+        if not self.is_init_success:
+            rospy.logwarn("MoveIt interface not initialized. Skipping TF lookup.")
+            return
+
+        # Rate limit the actual motion commands sent to MoveIt
+        # This is where we ensure we don't send commands too fast
+        if (rospy.Time.now() - self.last_move_command_time) < self.min_move_command_interval:
+            return
+
+        try:
+            # Wait for the transform to become available
+            # Reduced timeout for faster detection of missing transform
+            self.tf_listener.waitForTransform(
+                self.robot_base_frame,
+                self.haptic_target_frame,
+                rospy.Time(0), # Get the latest available transform
+                rospy.Duration(0.5) # Timeout after 0.5 seconds if transform isn't found
+            )
+            
+            # Get the transform from the robot's base frame to the haptic target frame
+            (translation, rotation) = self.tf_listener.lookupTransform(
+                self.robot_base_frame,
+                self.haptic_target_frame,
+                rospy.Time(0) # Get the latest available transform
+            )
+
+            target_pose = geometry_msgs.msg.Pose()
+            target_pose.position.x = translation[0]
+            target_pose.position.y = translation[1]
+            target_pose.position.z = translation[2]
+
+            target_pose.orientation.x = rotation[0]
+            target_pose.orientation.y = rotation[1]
+            target_pose.orientation.z = rotation[2]
+            target_pose.orientation.w = rotation[3]
+
+            # Before commanding, apply a simple speed limit based on the difference from current pose
+            # This manual scaling acts as an outer loop limit.
+            # MoveIt's internal scaling factors (set_max_velocity_scaling_factor etc.) are also crucial.
+            current_robot_pose = self.arm_group.get_current_pose().pose
+            
+            # Linear speed check
+            current_pos = np.array([current_robot_pose.position.x, current_robot_pose.position.y, current_robot_pose.position.z])
+            target_pos = np.array([target_pose.position.x, target_pose.position.y, target_pose.position.z])
+            
+            linear_distance = np.linalg.norm(target_pos - current_pos)
+            
+            # Estimate time for next movement (based on min_move_command_interval)
+            dt = (rospy.Time.now() - self.last_move_command_time).to_sec()
+            # Ensure dt is not zero or excessively large if there was a pause
+            if dt == 0 or dt > self.min_move_command_interval.to_sec() * 2: 
+                dt = self.min_move_command_interval.to_sec() 
+            
+            # Calculate required linear speed
+            required_linear_speed = linear_distance / dt
+
+            # If the required speed is too high, scale down the translation
+            if required_linear_speed > self.max_linear_speed:
+                rospy.logwarn_throttle(1, f"Required linear speed ({required_linear_speed:.3f} m/s) exceeds max ({self.max_linear_speed:.3f} m/s). Scaling translation.")
+                scale_factor = self.max_linear_speed / required_linear_speed
+                target_pose.position.x = current_robot_pose.position.x + (target_pose.position.x - current_robot_pose.position.x) * scale_factor
+                target_pose.position.y = current_robot_pose.position.y + (target_pose.position.y - current_robot_pose.position.y) * scale_factor
+                target_pose.position.z = current_robot_pose.position.z + (target_pose.position.z - current_robot_pose.position.z) * scale_factor
+
+            # Angular speed check (using orientation difference)
+            current_quat = [current_robot_pose.orientation.x, current_robot_pose.orientation.y, 
+                            current_robot_pose.orientation.z, current_robot_pose.orientation.w]
+            target_quat = [target_pose.orientation.x, target_pose.orientation.y, 
+                           target_pose.orientation.z, target_pose.orientation.w]
+            
+            # Relative rotation from current to target
+            q_rel = quaternion_multiply(quaternion_inverse(current_quat), target_quat)
+            
+            # Convert to axis-angle representation to get the rotation angle
+            angle = 2 * np.arccos(q_rel[3]) # q_rel[3] is the 'w' component
+            if angle > pi: # Ensure angle is between 0 and pi
+                angle = 2 * pi - angle
+            
+            required_angular_speed = angle / dt
+            
+            # If the required angular speed is too high, scale down the rotation
+            if required_angular_speed > self.max_angular_speed:
+                rospy.logwarn_throttle(1, f"Required angular speed ({required_angular_speed:.3f} rad/s) exceeds max ({self.max_angular_speed:.3f} rad/s). Scaling rotation.")
+                scale_factor = self.max_angular_speed / required_angular_speed
+                
+                # Linear interpolation for quaternions (Not SLERP, but works for small steps and scaling)
+                target_orientation_quat_scaled = np.array(current_quat) + (np.array(target_quat) - np.array(current_quat)) * scale_factor
+                target_orientation_quat_scaled = target_orientation_quat_scaled / np.linalg.norm(target_orientation_quat_scaled) # Re-normalize
+                
+                target_pose.orientation.x = target_orientation_quat_scaled[0]
+                target_pose.orientation.y = target_orientation_quat_scaled[1]
+                target_pose.orientation.z = target_orientation_quat_scaled[2]
+                target_pose.orientation.w = target_orientation_quat_scaled[3]
+
+            # Use logdebug for frequent messages to avoid console spam
+            rospy.logdebug(f"Commanding robot to target pose: Position({target_pose.position.x:.3f}, {target_pose.position.y:.3f}, {target_pose.position.z:.3f})")
+            rospy.logdebug(f"                          Orientation({target_pose.orientation.x:.3f}, {target_pose.orientation.y:.3f}, {target_pose.orientation.z:.3f}, {target_pose.orientation.w:.3f})")
+            
+            # Command MoveIt to move to the new target pose
+            success = self.go_to_pose(target_pose)
+            if success:
+                self.last_move_command_time = rospy.Time.now()
+            else:
+                rospy.logwarn_throttle(1, "Failed to plan or execute movement to target pose. MoveIt might be busy or goal unreachable.")
+
+        except tf.LookupException as e:
+            # This happens if the transform is not yet available or disappears
+            rospy.logdebug(f"TF Lookup Exception: {e}. Waiting for transform '{self.haptic_target_frame}' to '{self.robot_base_frame}'.")
+        except tf.ConnectivityException as e:
+            rospy.logerr(f"TF Connectivity Exception: {e}. Check if TF tree is valid.")
+        except tf.ExtrapolationException as e:
+            rospy.logwarn_throttle(1, f"TF Extrapolation Exception: {e}. Transform is too old or in the future. "
+                          "Ensure timestamps are synchronized and the haptic node is broadcasting at a sufficient rate.")
+        except Exception as e:
+            rospy.logerr(f"An unexpected error occurred during TF lookup: {e}")
+
+
+    def go_to_pose(self, pose):
+        """
+        Plans and executes a movement to a specified Cartesian pose.
+        """
+        self.arm_group.set_pose_target(pose)
+        
+        # Use arm_group.go(wait=False) for continuous movement
+        # This means the planning and execution is non-blocking.
+        # If wait=True, each small move would block until completion, leading to choppy motion.
+        # Also, allow replanning if initial plan fails
+        self.arm_group.allow_replanning(True) 
+        # set_planning_time and set_num_planning_attempts are already set in __init__
+        
+        success = self.arm_group.go(wait=False) # Non-blocking execution
+        return success
+
+    def reach_named_position(self, target):
+        arm_group = self.arm_group
+        rospy.loginfo("Going to named target " + target)
+        arm_group.set_named_target(target)
+        (success_flag, trajectory_message, planning_time, error_code) = arm_group.plan()
+        return arm_group.execute(trajectory_message, wait=True)
+
+    def get_cartesian_pose(self):
+        """
+        Gets and logs the current end-effector Cartesian pose.
+        """
+        pose = self.arm_group.get_current_pose()
+        rospy.loginfo("Actual cartesian pose is : ")
+        rospy.loginfo(pose.pose)
+        return pose.pose
+
+def main():
+    # Create an instance of the KinovaMoveItTeleop controller
+    teleop_controller = KinovaMoveItTeleop()
+
+    if teleop_controller.is_init_success:
+        # Keep the node running, waiting for incoming TF commands via the timer
+        rospy.spin()
+    else:
+        rospy.logerr("Kinova MoveIt Teleop node failed to initialize. Exiting.")
+
+if __name__ == '__main__':
+    try:
+        main()
+    except rospy.ROSInterruptException:
+        pass
