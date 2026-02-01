@@ -92,10 +92,6 @@ class StylusVelocityNode(Node):
         self.prev_angular_vel[1] = self.alpha_ang * raw_wy + (1.0 - self.alpha_ang) * self.prev_angular_vel[1]
         self.prev_angular_vel[2] = self.alpha_ang * raw_wz + (1.0 - self.alpha_ang) * self.prev_angular_vel[2]
 
-        self.prev_angular_vel[0] = 0.0
-        self.prev_angular_vel[1] = 0.0
-        self.prev_angular_vel[2] = 0.0
-
         # 5. Build and Publish Message
         twist_msg = Twist()
         twist_msg.linear.x, twist_msg.linear.y, twist_msg.linear.z = self.prev_linear_vel

@@ -92,6 +92,14 @@ def generate_launch_description():
         output="screen",
     )
 
+    velocity_calc_node = Node(
+        package="haptic_to_servo_py",
+        executable="pose_to_twist",
+        name="pose_to_twist_node",
+        parameters=[{'use_sim_time': use_sim_time}],
+        output="screen",
+    )
+
     # 7. Unified RViz
     rviz_config_path = os.path.join(get_package_share_directory("kinova_gen3_lite_moveit_config"), "config", "moveit.rviz")
     rviz_node = Node(
@@ -113,5 +121,6 @@ def generate_launch_description():
         move_group_node,
         servo_node,
         custom_servo_control_node,
+        velocity_calc_node,
         rviz_node
     ])
