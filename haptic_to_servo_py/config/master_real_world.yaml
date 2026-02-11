@@ -1,0 +1,68 @@
+###############################################
+# MoveIt Servo Config for REAL Kinova Gen3 lite
+###############################################
+moveit_servo:
+  # CHANGED: Must be false for real hardware
+  use_gazebo: false 
+
+  ## Properties of incoming commands
+  command_in_type: "speed_units" 
+  
+  # RECOMMENDATION: Start with lower scales (e.g., 0.1) for your first test
+  # to prevent the arm from jumping too fast.
+  scale:
+    linear:  0.2   # Reduced for safety
+    rotational:  0.4 
+    joint: 0.2
+
+  ## Properties of outgoing commands
+  # Real hardware benefits from a faster rate. 
+  # 0.01s = 100Hz. This provides much smoother motion on real motors.
+  publish_period: 0.01  
+  low_latency_mode: true  
+
+  command_out_type: trajectory_msgs/JointTrajectory
+
+  # Gen3 Lite hardware driver handles Joint Trajectories well
+  publish_joint_positions: true
+  publish_joint_velocities: false
+  publish_joint_accelerations: false
+
+  ## Plugins for smoothing
+  smoothing_filter_plugin_name: "online_signal_smoothing::ButterworthFilterPlugin"
+
+  is_primary_planning_scene_monitor: true
+
+  ## MoveIt properties
+  move_group_name: "arm"
+  planning_frame: "base_link" 
+
+  ## Other frames
+  ee_frame_name: "tool_frame"
+  robot_link_command_frame: "base_link"  
+
+  ## Stopping behaviour
+  incoming_command_timeout: 0.1  
+  num_outgoing_halt_msgs_to_publish: 4
+
+  ## Configure handling of singularities and joint limits
+  lower_singularity_threshold: 30.0  
+  hard_stop_singularity_threshold: 50.0 
+  joint_limit_margin: 0.1 
+  leaving_singularity_threshold_multiplier: 2.0 
+
+  ## Topic names
+  cartesian_command_in_topic: ~/delta_twist_cmds  
+  joint_command_in_topic: ~/delta_joint_cmds 
+  joint_topic: /joint_states
+  status_topic: ~/status 
+  
+  # CHANGED: The hardware driver typically uses this namespace
+  command_out_topic: /joint_trajectory_controller/joint_trajectory 
+
+  ## Collision checking
+  # CRITICAL for real hardware to prevent self-damage
+  check_collisions: true 
+  collision_check_rate: 10.0 
+  self_collision_proximity_threshold: 0.02 # Slightly increased for safety
+  scene_collision_proximity_threshold: 0.05
